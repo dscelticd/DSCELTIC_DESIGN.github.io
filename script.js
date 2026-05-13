@@ -1,411 +1,349 @@
-/*
- * Work Journal dashboard script
- *
- * This script fetches issues from a GitHub repository and computes
- * statistics for daily, weekly and monthly dashboards. It expects
- * each work report issue to contain a JSON object in a fenced code block
- * (```json ... ```). The JSON keys should match the field names
- * defined in the daily input requirements, such as "날짜", "담당자",
- * "파트", etc. For example:
- *
- * ```json
- * {
- *   "날짜": "2026-05-13",
- *   "담당자": "홍길동",
- *   "파트": "영상",
- *   "프로젝트명": "VESTA 홈페이지",
- *   "업무구분": "영상",
- *   "요청부서": "영업",
- *   "금일진행업무": "메인 배너 수정",
- *   "진행상태": "진행중",
- *   "완료예정일": "2026-05-20",
- *   "특이사항": "모바일 반응형 수정 필요",
- *   "산출물링크": "https://example.com",
- *   "주차": 20,
- *   "월": 5,
- *   "연도": 2026,
- *   "작업건수": 3
- * }
- * ```
- *
- * The script uses the GitHub REST API. To authenticate, store a
- * personal access token in localStorage under the key "githubToken" or
- * set it directly in the `token` variable below. Without a token
- * authenticated requests may hit rate limits. You can obtain a
- * token at https://github.com/settings/tokens with the "repo" scope.
- */
+// script.js — Supabase 전용 버전
 
-const repoOwner = 'dscelticd';
-const repoName = 'DSCELTIC_DESIGN.github.io';
+// Supabase 연결은 각 HTML 파일에서 먼저 되어 있어야 함.
+// HTML 하단 순서:
+// 1) supabase-js SDK
+// 2) const supabase = window.supabase.createClient(...)
+// 3) script.js
 
-// Retrieve a GitHub personal access token from localStorage or leave blank
-const token = localStorage.getItem('githubToken') || '';
+const TABLE_NAME = "work_reports";
 
-/**
- * Fetch all issues labeled with "work-report" from the repository.
- * Returns a promise that resolves to an array of issue objects.
- */
-async function fetchWorkIssues() {
-  const url = `https://api.github.com/repos/${repoOwner}/${repoName}/issues?state=all&labels=work-report&per_page=100`;
-  const headers = token
-    ? { Authorization: `token ${token}`, Accept: 'application/vnd.github+json' }
-    : { Accept: 'application/vnd.github+json' };
-  const response = await fetch(url, { headers });
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status}`);
-  }
-  const issues = await response.json();
-  return issues;
+const STATUS_DONE = ["완료"];
+const STATUS_PROGRESS = ["진행중"];
+const STATUS_REVIEW = ["검토중", "수정중"];
+const STATUS_BAD = ["지연", "보류", "자료대기"];
+
+function $(id) {
+  return document.getElementById(id);
 }
 
-/**
- * Parse a JSON object from an issue body. The JSON is expected
- * to be enclosed in a fenced code block marked as ```json ... ```.
- */
-function parseReport(issue) {
-  const regex = /```json([\s\S]*?)```/;
-  const match = regex.exec(issue.body);
-  if (!match) return null;
-  try {
-    const jsonText = match[1].trim();
-    const data = JSON.parse(jsonText);
-    return data;
-  } catch (e) {
-    console.error('Failed to parse JSON from issue', issue.number, e);
-    return null;
-  }
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
 }
 
-/**
- * Compute ISO week number for a date. Returns an object with year and week.
- */
-function getISOWeek(date) {
-  const tempDate = new Date(date.getTime());
-  tempDate.setHours(0, 0, 0, 0);
-  // Thursday in current week decides the year.
-  tempDate.setDate(tempDate.getDate() + 3 - ((tempDate.getDay() + 6) % 7));
-  const week1 = new Date(tempDate.getFullYear(), 0, 4);
+function getTodayString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getISOWeek(dateInput) {
+  const date = new Date(dateInput);
+  const temp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = temp.getUTCDay() || 7;
+  temp.setUTCDate(temp.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(temp.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((temp - yearStart) / 86400000) + 1) / 7);
+
   return {
-    year: tempDate.getFullYear(),
-    week:
-      1 + Math.round(
-        ((tempDate.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7
-      ),
+    year: temp.getUTCFullYear(),
+    week,
   };
 }
 
-/**
- * Group reports by a predicate function returning a key.
- */
-function groupBy(array, keyFn) {
-  return array.reduce((acc, item) => {
-    const key = keyFn(item);
-    acc[key] = acc[key] || [];
-    acc[key].push(item);
+function getMonthString(dateInput) {
+  const d = new Date(dateInput);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function groupBy(items, key) {
+  return items.reduce((acc, item) => {
+    const value = item[key] || "미지정";
+    if (!acc[value]) acc[value] = [];
+    acc[value].push(item);
     return acc;
   }, {});
 }
 
-/**
- * Load and display the daily dashboard.
- */
-async function loadDailyDashboard() {
-  try {
-    const issues = await fetchWorkIssues();
-    const reports = issues
-      .map(parseReport)
-      .filter((r) => r && r['날짜']);
-    // Filter for today's date
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
-    const todaysReports = reports.filter((r) => r['날짜'] === todayStr);
-    // Compute counts
-    const totalToday = todaysReports.length;
-    const completedToday = todaysReports.filter((r) => r['진행상태'] === '완료').length;
-    const inProgress = todaysReports.filter((r) => ['진행중', '검토중', '수정중'].includes(r['진행상태'])).length;
-    const delayed = todaysReports.filter((r) => ['지연', '보류', '자료대기'].includes(r['진행상태'])).length;
-    // Update the DOM
-    document.getElementById('today-total').textContent = totalToday;
-    document.getElementById('today-completed').textContent = completedToday;
-    document.getElementById('today-inprogress').textContent = inProgress;
-    document.getElementById('today-delayed').textContent = delayed;
-    // List today's reports
-    const listEl = document.getElementById('today-list');
-    listEl.innerHTML = '';
-    todaysReports.forEach((r) => {
-      const li = document.createElement('li');
-      li.textContent = `${r['프로젝트명']} - ${r['금일진행업무']} (${r['진행상태']})`;
-      listEl.appendChild(li);
-    });
-  } catch (e) {
-    console.error(e);
-    alert('Failed to load daily dashboard');
-  }
+function countByStatus(items, statuses) {
+  return items.filter((item) => statuses.includes(item["진행상태"])).length;
 }
 
-/**
- * Load and display the weekly dashboard.
- */
-async function loadWeeklyDashboard() {
-  try {
-    const issues = await fetchWorkIssues();
-    const reports = issues
-      .map(parseReport)
-      .filter((r) => r && r['날짜']);
-    const now = new Date();
-    const { year: currentYear, week: currentWeek } = getISOWeek(now);
-    const weeklyReports = reports.filter((r) => {
-      const d = new Date(r['날짜']);
-      const { year, week } = getISOWeek(d);
-      return year === currentYear && week === currentWeek;
-    });
-    // Compute metrics
-    const total = weeklyReports.length;
-    const totalTasks = weeklyReports.reduce((sum, r) => sum + (Number(r['작업건수']) || 0), 0);
-    const completed = weeklyReports.filter((r) => r['진행상태'] === '완료').length;
-    const inProgress = weeklyReports.filter((r) => ['진행중', '검토중', '수정중'].includes(r['진행상태'])).length;
-    const delayed = weeklyReports.filter((r) => ['지연', '보류', '자료대기'].includes(r['진행상태'])).length;
-    const doneOrInProcess = completed + inProgress;
-    const completionRate = total > 0 ? ((completed / total) * 100).toFixed(1) : '0';
-    // Populate summary stats
-    document.getElementById('week-total-work').textContent = total;
-    document.getElementById('week-total-task').textContent = totalTasks;
-    document.getElementById('week-completed').textContent = completed;
-    document.getElementById('week-inprogress').textContent = inProgress;
-    document.getElementById('week-review').textContent = weeklyReports.filter((r) => ['검토중', '수정중'].includes(r['진행상태'])).length;
-    document.getElementById('week-delayed').textContent = delayed;
-    document.getElementById('week-completion-rate').textContent = completionRate + '%';
-    // Group by project and compute progress (completed / total per project)
-    const projectGroups = groupBy(weeklyReports, (r) => r['프로젝트명']);
-    const projectTableBody = document.getElementById('project-table-body');
-    projectTableBody.innerHTML = '';
-    Object.keys(projectGroups).forEach((project) => {
-      const list = projectGroups[project];
-      const totalP = list.length;
-      const completedP = list.filter((r) => r['진행상태'] === '완료').length;
-      const progress = totalP > 0 ? ((completedP / totalP) * 100).toFixed(1) : '0';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${project}</td><td>${totalP}</td><td>${completedP}</td><td>${progress}%</td>`;
-      projectTableBody.appendChild(tr);
-    });
-    // Group by department
-    const deptGroups = groupBy(weeklyReports, (r) => r['요청부서']);
-    const deptTableBody = document.getElementById('dept-table-body');
-    deptTableBody.innerHTML = '';
-    Object.keys(deptGroups).forEach((dept) => {
-      const list = deptGroups[dept];
-      const totalD = list.length;
-      const completedD = list.filter((r) => r['진행상태'] === '완료').length;
-      const progressD = totalD > 0 ? ((completedD / totalD) * 100).toFixed(1) : '0';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${dept}</td><td>${totalD}</td><td>${completedD}</td><td>${progressD}%</td>`;
-      deptTableBody.appendChild(tr);
-    });
-    // Group by part and by type (업무구분)
-    const partGroups = groupBy(weeklyReports, (r) => r['파트']);
-    const partTableBody = document.getElementById('part-table-body');
-    partTableBody.innerHTML = '';
-    Object.keys(partGroups).forEach((part) => {
-      const list = partGroups[part];
-      const totalP2 = list.length;
-      const completedP2 = list.filter((r) => r['진행상태'] === '완료').length;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${part}</td><td>${totalP2}</td><td>${completedP2}</td>`;
-      partTableBody.appendChild(tr);
-    });
-    const typeGroups = groupBy(weeklyReports, (r) => r['업무구분']);
-    const typeTableBody = document.getElementById('type-table-body');
-    typeTableBody.innerHTML = '';
-    Object.keys(typeGroups).forEach((type) => {
-      const list = typeGroups[type];
-      const totalT = list.length;
-      const completedT = list.filter((r) => r['진행상태'] === '완료').length;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${type}</td><td>${totalT}</td><td>${completedT}</td>`;
-      typeTableBody.appendChild(tr);
-    });
-    // Group by team member
-    const memberGroups = groupBy(weeklyReports, (r) => r['담당자']);
-    const memberTableBody = document.getElementById('member-table-body');
-    memberTableBody.innerHTML = '';
-    Object.keys(memberGroups).forEach((member) => {
-      const list = memberGroups[member];
-      const totalM = list.length;
-      const completedM = list.filter((r) => r['진행상태'] === '완료').length;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${member}</td><td>${totalM}</td><td>${completedM}</td>`;
-      memberTableBody.appendChild(tr);
-    });
-  } catch (e) {
-    console.error(e);
-    alert('Failed to load weekly dashboard');
-  }
+function sumWorkCount(items) {
+  return items.reduce((sum, item) => sum + Number(item["작업건수"] || 0), 0);
 }
 
-/**
- * Load and display the monthly dashboard.
- */
-async function loadMonthlyDashboard() {
-  try {
-    const issues = await fetchWorkIssues();
-    const reports = issues
-      .map(parseReport)
-      .filter((r) => r && r['날짜']);
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const monthlyReports = reports.filter((r) => {
-      const d = new Date(r['날짜']);
-      return d.getFullYear() === year && d.getMonth() === month;
-    });
-    // Compute metrics
-    const total = monthlyReports.length;
-    const totalTasks = monthlyReports.reduce((sum, r) => sum + (Number(r['작업건수']) || 0), 0);
-    const completed = monthlyReports.filter((r) => r['진행상태'] === '완료').length;
-    const inProgress = monthlyReports.filter((r) => ['진행중', '검토중', '수정중'].includes(r['진행상태'])).length;
-    const review = monthlyReports.filter((r) => ['검토중', '수정중'].includes(r['진행상태'])).length;
-    const delayed = monthlyReports.filter((r) => ['지연', '보류', '자료대기'].includes(r['진행상태'])).length;
-    const completionRate = total > 0 ? ((completed / total) * 100).toFixed(1) : '0';
-    // Completed task count and delayed task count
-    const completedTasks = monthlyReports.reduce(
-      (sum, r) => sum + (r['진행상태'] === '완료' ? Number(r['작업건수']) || 0 : 0),
-      0
-    );
-    const delayedTasks = monthlyReports.reduce(
-      (sum, r) => sum + (['지연', '보류', '자료대기'].includes(r['진행상태']) ? Number(r['작업건수']) || 0 : 0),
-      0
-    );
-    const overdue = monthlyReports.filter((r) => {
-      if (!r['완료예정일'] || r['진행상태'] === '완료') return false;
-      const due = new Date(r['완료예정일']);
-      return due < now;
-    }).length;
-    // Populate summary stats
-    document.getElementById('month-total-work').textContent = total;
-    document.getElementById('month-total-task').textContent = totalTasks;
-    document.getElementById('month-completed').textContent = completed;
-    document.getElementById('month-inprogress').textContent = inProgress;
-    document.getElementById('month-review').textContent = review;
-    document.getElementById('month-delayed').textContent = delayed;
-    document.getElementById('month-completion-rate').textContent = completionRate + '%';
-    document.getElementById('month-completed-tasks').textContent = completedTasks;
-    document.getElementById('month-delayed-tasks').textContent = delayedTasks;
-    document.getElementById('month-overdue').textContent = overdue;
-    // Calendar generation
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const calendarEl = document.getElementById('calendar');
-    calendarEl.innerHTML = '';
-    // Fill days from 1 to lastDay.getDate()
-    for (let day = 1; day <= lastDay.getDate(); day++) {
-      const dateStr = new Date(year, month, day).toISOString().slice(0, 10);
-      const dayReports = monthlyReports.filter((r) => r['날짜'] === dateStr);
-      const dayEl = document.createElement('div');
-      dayEl.className = 'day';
-      const h4 = document.createElement('h4');
-      h4.textContent = day;
-      dayEl.appendChild(h4);
-      const ul = document.createElement('ul');
-      dayReports.forEach((r) => {
-        const li = document.createElement('li');
-        li.textContent = `${r['프로젝트명']} (${r['진행상태']})`;
-        ul.appendChild(li);
-      });
-      dayEl.appendChild(ul);
-      calendarEl.appendChild(dayEl);
+function completionRate(items) {
+  if (!items.length) return "0%";
+  const done = countByStatus(items, STATUS_DONE);
+  return `${Math.round((done / items.length) * 100)}%`;
+}
+
+async function fetchReports() {
+  if (!window.supabase && typeof supabase === "undefined") {
+    console.error("Supabase client가 없습니다. HTML에서 SDK와 createClient 순서를 확인하세요.");
+    return [];
+  }
+
+  const client = window.supabaseClient || supabase;
+
+  const { data, error } = await client
+    .from(TABLE_NAME)
+    .select("*")
+    .order("날짜", { ascending: false });
+
+  if (error) {
+    console.error("Supabase 데이터 불러오기 실패:", error);
+    alert("Supabase 데이터 불러오기 실패: " + error.message);
+    return [];
+  }
+
+  return data || [];
+}
+
+function renderSimpleList(id, items) {
+  const el = $(id);
+  if (!el) return;
+
+  if (!items.length) {
+    el.innerHTML = "<li>표시할 업무가 없습니다.</li>";
+    return;
+  }
+
+  el.innerHTML = items
+    .map((item) => {
+      const project = item["프로젝트명"] || "프로젝트 미지정";
+      const task = item["금일진행업무"] || "";
+      const status = item["진행상태"] || "상태 미지정";
+      const person = item["담당자"] || "담당자 미지정";
+
+      return `<li><strong>${project}</strong> - ${task} / ${person} / ${status}</li>`;
+    })
+    .join("");
+}
+
+function renderGroupTable(tbodyId, groups, columns = "basic") {
+  const tbody = $(tbodyId);
+  if (!tbody) return;
+
+  const rows = Object.entries(groups).map(([name, items]) => {
+    const total = items.length;
+    const done = countByStatus(items, STATUS_DONE);
+    const rate = total ? `${Math.round((done / total) * 100)}%` : "0%";
+
+    if (columns === "withRate") {
+      return `
+        <tr>
+          <td>${name}</td>
+          <td>${total}</td>
+          <td>${done}</td>
+          <td>${rate}</td>
+        </tr>
+      `;
     }
-    // Weekly trend (by ISO week number)
-    const weekGroups = groupBy(monthlyReports, (r) => {
-      const d = new Date(r['날짜']);
-      const { week } = getISOWeek(d);
-      return week;
-    });
-    const weekTableBody = document.getElementById('week-trend-body');
-    weekTableBody.innerHTML = '';
-    Object.keys(weekGroups).forEach((weekNo) => {
-      const list = weekGroups[weekNo];
-      const totalW = list.length;
-      const completedW = list.filter((r) => r['진행상태'] === '완료').length;
-      const inProgressW = list.filter((r) => ['진행중', '검토중', '수정중'].includes(r['진행상태'])).length;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${weekNo}</td><td>${totalW}</td><td>${completedW}</td><td>${inProgressW}</td>`;
-      weekTableBody.appendChild(tr);
-    });
-    // Department table
-    const deptGroups = groupBy(monthlyReports, (r) => r['요청부서']);
-    const mDeptTableBody = document.getElementById('month-dept-body');
-    mDeptTableBody.innerHTML = '';
-    Object.keys(deptGroups).forEach((dept) => {
-      const list = deptGroups[dept];
-      const totalD = list.length;
-      const completedD = list.filter((r) => r['진행상태'] === '완료').length;
-      const progress = totalD > 0 ? ((completedD / totalD) * 100).toFixed(1) : '0';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${dept}</td><td>${totalD}</td><td>${completedD}</td><td>${progress}%</td>`;
-      mDeptTableBody.appendChild(tr);
-    });
-    // Part table
-    const partGroups = groupBy(monthlyReports, (r) => r['파트']);
-    const mPartTableBody = document.getElementById('month-part-body');
-    mPartTableBody.innerHTML = '';
-    Object.keys(partGroups).forEach((part) => {
-      const list = partGroups[part];
-      const totalP = list.length;
-      const completedP = list.filter((r) => r['진행상태'] === '완료').length;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${part}</td><td>${totalP}</td><td>${completedP}</td>`;
-      mPartTableBody.appendChild(tr);
-    });
-    // Type table
-    const typeGroups = groupBy(monthlyReports, (r) => r['업무구분']);
-    const mTypeTableBody = document.getElementById('month-type-body');
-    mTypeTableBody.innerHTML = '';
-    Object.keys(typeGroups).forEach((type) => {
-      const list = typeGroups[type];
-      const totalT = list.length;
-      const completedT = list.filter((r) => r['진행상태'] === '완료').length;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${type}</td><td>${totalT}</td><td>${completedT}</td>`;
-      mTypeTableBody.appendChild(tr);
-    });
-    // Member table
-    const memberGroups = groupBy(monthlyReports, (r) => r['담당자']);
-    const mMemberTableBody = document.getElementById('month-member-body');
-    mMemberTableBody.innerHTML = '';
-    Object.keys(memberGroups).forEach((member) => {
-      const list = memberGroups[member];
-      const totalM = list.length;
-      const completedM = list.filter((r) => r['진행상태'] === '완료').length;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${member}</td><td>${totalM}</td><td>${completedM}</td>`;
-      mMemberTableBody.appendChild(tr);
-    });
-    // Identify key issues (delayed or overdue)
-    const keyIssues = monthlyReports.filter(
-      (r) => ['지연', '보류', '자료대기'].includes(r['진행상태']) ||
-        (r['완료예정일'] && new Date(r['완료예정일']) < now && r['진행상태'] !== '완료')
-    );
-    const issuesListEl = document.getElementById('month-issues');
-    issuesListEl.innerHTML = '';
-    keyIssues.forEach((r) => {
-      const li = document.createElement('li');
-      li.textContent = `${r['날짜']} ${r['프로젝트명']} - ${r['금일진행업무']} (${r['진행상태']})`;
-      issuesListEl.appendChild(li);
-    });
-  } catch (e) {
-    console.error(e);
-    alert('Failed to load monthly dashboard');
-  }
+
+    return `
+      <tr>
+        <td>${name}</td>
+        <td>${total}</td>
+        <td>${done}</td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = rows.join("") || `<tr><td colspan="4">데이터가 없습니다.</td></tr>`;
 }
 
-// Automatically detect which page is loaded and call the corresponding loader
-document.addEventListener('DOMContentLoaded', () => {
-  const path = window.location.pathname;
-  if (path.endsWith('daily.html')) {
+function renderProjectTable(items) {
+  const tbody = $("project-table-body");
+  if (!tbody) return;
+
+  const groups = groupBy(items, "프로젝트명");
+
+  tbody.innerHTML =
+    Object.entries(groups)
+      .map(([project, list]) => {
+        const total = list.length;
+        const done = countByStatus(list, STATUS_DONE);
+        const rate = total ? `${Math.round((done / total) * 100)}%` : "0%";
+
+        return `
+          <tr>
+            <td>${project}</td>
+            <td>${total}</td>
+            <td>${done}</td>
+            <td>${rate}</td>
+          </tr>
+        `;
+      })
+      .join("") || `<tr><td colspan="4">데이터가 없습니다.</td></tr>`;
+}
+
+function renderCalendar(items) {
+  const calendar = $("calendar");
+  if (!calendar) return;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const lastDate = new Date(year, month + 1, 0).getDate();
+
+  let html = "";
+
+  for (let day = 1; day <= lastDate; day++) {
+    const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayItems = items.filter((item) => item["날짜"] === date);
+
+    const done = countByStatus(dayItems, STATUS_DONE);
+    const progress = countByStatus(dayItems, STATUS_PROGRESS);
+    const review = countByStatus(dayItems, STATUS_REVIEW);
+    const bad = countByStatus(dayItems, STATUS_BAD);
+
+    html += `
+      <div class="day">
+        <h4>${day}</h4>
+        ${
+          dayItems.length
+            ? `
+              <ul>
+                <li>총 ${dayItems.length}건</li>
+                <li>완료 ${done} / 진행 ${progress}</li>
+                <li>검토·수정 ${review} / 지연 ${bad}</li>
+              </ul>
+            `
+            : ""
+        }
+      </div>
+    `;
+  }
+
+  calendar.innerHTML = html;
+}
+
+function renderWeekTrend(items) {
+  const tbody = $("week-trend-body");
+  if (!tbody) return;
+
+  const groups = {};
+
+  items.forEach((item) => {
+    const week = item["주차"] || getISOWeek(item["날짜"]).week;
+    if (!groups[week]) groups[week] = [];
+    groups[week].push(item);
+  });
+
+  tbody.innerHTML =
+    Object.entries(groups)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([week, list]) => {
+        return `
+          <tr>
+            <td>${week}주차</td>
+            <td>${list.length}</td>
+            <td>${countByStatus(list, STATUS_DONE)}</td>
+            <td>${countByStatus(list, STATUS_PROGRESS)}</td>
+          </tr>
+        `;
+      })
+      .join("") || `<tr><td colspan="4">데이터가 없습니다.</td></tr>`;
+}
+
+async function loadDailyDashboard() {
+  const reports = await fetchReports();
+  const today = getTodayString();
+
+  const todayItems = reports.filter((item) => item["날짜"] === today);
+
+  setText("today-total", todayItems.length);
+  setText("today-completed", countByStatus(todayItems, STATUS_DONE));
+  setText(
+    "today-inprogress",
+    countByStatus(todayItems, [...STATUS_PROGRESS, ...STATUS_REVIEW])
+  );
+  setText("today-delayed", countByStatus(todayItems, STATUS_BAD));
+
+  renderSimpleList("today-list", todayItems);
+}
+
+async function loadWeeklyDashboard() {
+  const reports = await fetchReports();
+  const now = new Date();
+  const current = getISOWeek(now);
+
+  const weekItems = reports.filter((item) => {
+    if (!item["날짜"]) return false;
+    const target = getISOWeek(item["날짜"]);
+    return target.year === current.year && target.week === current.week;
+  });
+
+  setText("week-total-work", weekItems.length);
+  setText("week-total-task", sumWorkCount(weekItems));
+  setText("week-completed", countByStatus(weekItems, STATUS_DONE));
+  setText("week-inprogress", countByStatus(weekItems, STATUS_PROGRESS));
+  setText("week-review", countByStatus(weekItems, STATUS_REVIEW));
+  setText("week-delayed", countByStatus(weekItems, STATUS_BAD));
+  setText("week-completion-rate", completionRate(weekItems));
+
+  renderProjectTable(weekItems);
+  renderGroupTable("dept-table-body", groupBy(weekItems, "요청부서"), "withRate");
+  renderGroupTable("part-table-body", groupBy(weekItems, "파트"));
+  renderGroupTable("type-table-body", groupBy(weekItems, "업무구분"));
+  renderGroupTable("member-table-body", groupBy(weekItems, "담당자"));
+}
+
+async function loadMonthlyDashboard() {
+  const reports = await fetchReports();
+  const currentMonth = getMonthString(new Date());
+
+  const monthItems = reports.filter((item) => {
+    if (!item["날짜"]) return false;
+    return getMonthString(item["날짜"]) === currentMonth;
+  });
+
+  const now = new Date();
+
+  const overdueItems = monthItems.filter((item) => {
+    if (!item["완료예정일"]) return false;
+    if (item["진행상태"] === "완료") return false;
+
+    const due = new Date(item["완료예정일"]);
+    return due < now;
+  });
+
+  const completedItems = monthItems.filter((item) => item["진행상태"] === "완료");
+  const delayedItems = monthItems.filter((item) => STATUS_BAD.includes(item["진행상태"]));
+
+  setText("month-total-work", monthItems.length);
+  setText("month-total-task", sumWorkCount(monthItems));
+  setText("month-completed", countByStatus(monthItems, STATUS_DONE));
+  setText("month-inprogress", countByStatus(monthItems, STATUS_PROGRESS));
+  setText("month-review", countByStatus(monthItems, STATUS_REVIEW));
+  setText("month-delayed", countByStatus(monthItems, STATUS_BAD));
+  setText("month-completion-rate", completionRate(monthItems));
+  setText("month-completed-tasks", sumWorkCount(completedItems));
+  setText("month-delayed-tasks", sumWorkCount(delayedItems));
+  setText("month-overdue", overdueItems.length);
+
+  renderCalendar(monthItems);
+  renderWeekTrend(monthItems);
+
+  renderGroupTable("month-dept-body", groupBy(monthItems, "요청부서"), "withRate");
+  renderGroupTable("month-part-body", groupBy(monthItems, "파트"));
+  renderGroupTable("month-type-body", groupBy(monthItems, "업무구분"));
+  renderGroupTable("month-member-body", groupBy(monthItems, "담당자"));
+
+  const issueItems = monthItems.filter((item) => {
+    return (
+      STATUS_BAD.includes(item["진행상태"]) ||
+      overdueItems.includes(item) ||
+      (item["특이사항"] && item["특이사항"].trim() !== "")
+    );
+  });
+
+  renderSimpleList("month-issues", issueItems);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const page = location.pathname.split("/").pop();
+
+  if (page === "daily.html") {
     loadDailyDashboard();
-  } else if (path.endsWith('weekly.html')) {
+  }
+
+  if (page === "weekly.html") {
     loadWeeklyDashboard();
-  } else if (path.endsWith('monthly.html')) {
+  }
+
+  if (page === "monthly.html") {
     loadMonthlyDashboard();
   }
 });
