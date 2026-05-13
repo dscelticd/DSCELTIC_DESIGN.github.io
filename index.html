@@ -2,64 +2,70 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>일간업무 입력</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>업무일지 대시보드</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h1>일간업무 입력</h1>
+  <header>
+    <h1>업무일지 시스템</h1>
 
-  <form id="reportForm">
-    <input type="date" id="work_date" required />
-    <input type="text" id="project_name" placeholder="프로젝트명" required />
-    <textarea id="today_work" placeholder="금일진행업무" required></textarea>
+    <nav>
+      <a href="daily.html">일간</a>
+      <a href="weekly.html">주간</a>
+      <a href="monthly.html">월간</a>
+    </nav>
+  </header>
 
-    <select id="part">
-      <option value="영상">영상</option>
-      <option value="시각">시각</option>
-    </select>
+  <main>
+    <section class="card">
+      <h2>소개</h2>
 
-    <select id="status">
-      <option value="진행중">진행중</option>
-      <option value="검토중">검토중</option>
-      <option value="수정중">수정중</option>
-      <option value="완료">완료</option>
-      <option value="보류">보류</option>
-      <option value="자료대기">자료대기</option>
-      <option value="지연">지연</option>
-    </select>
+      <p>
+        이 웹사이트는 GitHub Issues를 데이터베이스로 활용하여
+        일간/주간/월간 업무 보고를 관리하는 대시보드입니다.
+      </p>
 
-    <button type="submit">저장</button>
-  </form>
+      <p>
+        팀원은 GitHub Issues를 통해 업무 내용을 등록하고,
+        대시보드에서 현황을 실시간으로 확인할 수 있습니다.
+      </p>
 
-  <script type="module">
-    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+      <p>
+        <a href="https://github.com/dscelticd/DSCELTIC_DESIGN.github.io/issues/new?labels=work-report">
+          업무 이슈 작성하기
+        </a>
+      </p>
+    </section>
 
-    const supabaseUrl = 'https://ahfaulpvbhddqbcssuhd.supabase.co';
-    const supabaseKey = 'sb_publishable_5VBkpWMI5AmnLCAEg68aGg_Rgq5M8UQ';
+    <section class="card">
+      <h2>대시보드</h2>
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+      <p>
+        상단 네비게이션을 통해
+        일간 / 주간 / 월간 대시보드를 볼 수 있습니다.
+      </p>
+    </section>
+  </main>
 
-    document.getElementById('reportForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-      const data = {
-        work_date: document.getElementById('work_date').value,
-        project_name: document.getElementById('project_name').value,
-        today_work: document.getElementById('today_work').value,
-        part: document.getElementById('part').value,
-        status: document.getElementById('status').value
-      };
+  <!-- Supabase 연결 -->
+  <script>
+    const SUPABASE_URL = "https://ahfaulpvbhddqbcssuhd.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_5VBkpWMI5AmnLCAEg68aGg_Rgq5M8UQ";
 
-      const { error } = await supabase
-        .from('daily_reports')
-        .insert([data]);
+    const supabase = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY
+    );
 
-      if (error) {
-        alert('저장 실패: ' + error.message);
-      } else {
-        alert('저장 완료');
-        e.target.reset();
-      }
-    });
+    console.log("Supabase connected");
   </script>
+
+  <!-- 기존 JS -->
+  <script src="script.js"></script>
+
 </body>
 </html>
