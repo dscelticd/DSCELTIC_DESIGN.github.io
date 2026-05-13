@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>일간 대시보드</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>일간 대시보드</h1>
+    <nav>
+      <a href="index.html">홈</a>
+      <a href="weekly.html">주간</a>
+      <a href="monthly.html">월간</a>
+    </nav>
+  </header>
+  <main>
+    <section class="card">
+      <h2>오늘의 통계</h2>
+      <div class="stats-grid">
+        <div class="stat">
+          <h3>등록된 업무</h3>
+          <p id="today-total">0</p>
+        </div>
+        <div class="stat">
+          <h3>완료된 업무</h3>
+          <p id="today-completed">0</p>
+        </div>
+        <div class="stat">
+          <h3>진행 중</h3>
+          <p id="today-inprogress">0</p>
+        </div>
+        <div class="stat">
+          <h3>지연/보류</h3>
+          <p id="today-delayed">0</p>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>오늘의 업무 목록</h2>
+      <ul id="today-list"></ul>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>

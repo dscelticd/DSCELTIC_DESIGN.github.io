@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>월간 대시보드</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>월간 대시보드</h1>
+    <nav>
+      <a href="index.html">홈</a>
+      <a href="daily.html">일간</a>
+      <a href="weekly.html">주간</a>
+    </nav>
+  </header>
+  <main>
+    <section class="card">
+      <h2>월간 핵심 현황</h2>
+      <div class="stats-grid">
+        <div class="stat"><h3>업무 건수</h3><p id="month-total-work">0</p></div>
+        <div class="stat"><h3>작업 건수</h3><p id="month-total-task">0</p></div>
+        <div class="stat"><h3>완료</h3><p id="month-completed">0</p></div>
+        <div class="stat"><h3>진행중</h3><p id="month-inprogress">0</p></div>
+        <div class="stat"><h3>검토·수정</h3><p id="month-review">0</p></div>
+        <div class="stat"><h3>지연·보류</h3><p id="month-delayed">0</p></div>
+        <div class="stat"><h3>완료율</h3><p id="month-completion-rate">0%</p></div>
+        <div class="stat"><h3>완료 작업</h3><p id="month-completed-tasks">0</p></div>
+        <div class="stat"><h3>지연 작업</h3><p id="month-delayed-tasks">0</p></div>
+        <div class="stat"><h3>예정 초과</h3><p id="month-overdue">0</p></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>날짜별 업무 캘린더</h2>
+      <div id="calendar" class="calendar"></div>
+    </section>
+    <section class="card">
+      <h2>주차별 업무 추이</h2>
+      <table>
+        <thead><tr><th>주차</th><th>총 업무</th><th>완료</th><th>진행중</th></tr></thead>
+        <tbody id="week-trend-body"></tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>요청 부서별 현황</h2>
+      <table>
+        <thead><tr><th>요청부서</th><th>총 업무</th><th>완료</th><th>완료율</th></tr></thead>
+        <tbody id="month-dept-body"></tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>파트별 현황</h2>
+      <table>
+        <thead><tr><th>파트</th><th>총 업무</th><th>완료</th></tr></thead>
+        <tbody id="month-part-body"></tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>업무 구분별 현황</h2>
+      <table>
+        <thead><tr><th>업무구분</th><th>총 업무</th><th>완료</th></tr></thead>
+        <tbody id="month-type-body"></tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>팀원별 현황</h2>
+      <table>
+        <thead><tr><th>담당자</th><th>총 업무</th><th>완료</th></tr></thead>
+        <tbody id="month-member-body"></tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>월간 핵심 이슈</h2>
+      <ul id="month-issues"></ul>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
