@@ -35,8 +35,8 @@
  * token at https://github.com/settings/tokens with the "repo" scope.
  */
 
-const repoOwner = 'YOUR_GITHUB_USERNAME';
-const repoName = 'YOUR_REPOSITORY_NAME';
+const repoOwner = 'dscelticd';
+const repoName = 'DSCELTIC_DESIGN.github.io';
 
 // Retrieve a GitHub personal access token from localStorage or leave blank
 const token = localStorage.getItem('githubToken') || '';
